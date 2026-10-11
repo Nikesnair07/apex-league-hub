@@ -720,19 +720,40 @@
       const tournaments = state.tournaments.filter(t => !query || t.name.toLowerCase().includes(query) || t.format.toLowerCase().includes(query));
       createdList.innerHTML = '<h3 class="card-title">Created Tournaments</h3>' + (
         tournaments.length
-          ? '<div class="grid-2-col mt-3">' + tournaments.map(t => `
-              <article class="card">
-                <div class="card-header">
-                  <div>
-                    <h4 class="card-title">${escapeHtml(t.name)}</h4>
-                    <p class="card-subtitle">${escapeHtml(t.format)} • ${t.teamCount} teams</p>
+          ? tournaments.map(t => {
+              const rounds = Array.isArray(t.bracketRounds) ? t.bracketRounds : [];
+              const bracketHtml = rounds.length ? `
+                <div class="bracket-wrapper mt-3">
+                  <h4 class="bracket-title"><i class="fa-solid fa-sitemap"></i> ${escapeHtml(t.name)} — Knockout Tree</h4>
+                  <div class="bracket-tree tournament-bracket-tree" style="display:flex;align-items:center;gap:28px;overflow-x:auto;padding:12px 4px 18px;">
+                    ${rounds.map(round => `
+                      <div class="bracket-column" style="min-width:190px;flex:0 0 190px;display:flex;flex-direction:column;justify-content:space-around;gap:24px;">
+                        <div style="font-weight:700;color:var(--text-muted);text-align:center;margin-bottom:4px;">${escapeHtml(round.name)}</div>
+                        ${round.matches.map(match => `
+                          <div class="bracket-match" style="min-width:170px;">
+                            <div class="bracket-team-line"><span>${escapeHtml(match.team1)}</span><span>${escapeHtml(match.score1)}</span></div>
+                            <div class="bracket-team-line"><span>${escapeHtml(match.team2)}</span><span>${escapeHtml(match.score2)}</span></div>
+                          </div>
+                        `).join('')}
+                      </div>
+                    `).join('')}
                   </div>
-                  <span class="badge badge-cyan">${escapeHtml(t.status)}</span>
-                </div>
-                <p class="card-subtitle">Starts: ${escapeHtml(t.startDate)}</p>
-                <button type="button" class="btn btn-sm btn-outline tournament-delete-btn" data-id="${t.id}"><i class="fa-solid fa-trash"></i> Delete</button>
-              </article>
-            `).join('') + '</div>'
+                </div>` : '<p class="card-subtitle mt-2">This tournament was created before knockout draws were enabled. Delete it and create it again to generate matchups.</p>';
+              return `
+                <article class="card mt-3">
+                  <div class="card-header">
+                    <div>
+                      <h4 class="card-title">${escapeHtml(t.name)}</h4>
+                      <p class="card-subtitle">${escapeHtml(t.format)} • ${t.teamCount} teams</p>
+                    </div>
+                    <span class="badge badge-cyan">${escapeHtml(t.status)}</span>
+                  </div>
+                  <p class="card-subtitle">Starts: ${escapeHtml(t.startDate)}</p>
+                  <p class="card-subtitle">Teams drawn: ${(t.teams || []).map(escapeHtml).join(' • ') || 'Not available'}</p>
+                  ${bracketHtml}
+                  <button type="button" class="btn btn-sm btn-outline tournament-delete-btn mt-2" data-id="${escapeHtml(t.id)}"><i class="fa-solid fa-trash"></i> Delete</button>
+                </article>`;
+            }).join('')
           : '<p class="card-subtitle mt-3">' + (query ? 'No created tournaments match your search.' : 'No tournaments created yet. Use “Create Tournament” to add one.') + '</p>'
       );
       createdList.querySelectorAll('.tournament-delete-btn').forEach(btn => {
@@ -1301,6 +1322,36 @@
           alert('Please enter a tournament name, start date, and a team count between 2 and 64.');
           return;
         }
+        // Build a fresh knockout draw for this tournament using the registered teams.
+        const availableTeams = state.teams.map(team => team.name);
+        for (let i = availableTeams.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [availableTeams[i], availableTeams[j]] = [availableTeams[j], availableTeams[i]];
+        }
+        const selectedTeams = Array.from({ length: teamCount }, (_, index) =>
+          availableTeams[index] || `TBD Team ${index + 1}`
+        );
+        const bracketTeams = selectedTeams.slice();
+        const bracketRounds = [];
+        let roundNumber = 1;
+        let currentTeams = bracketTeams;
+        const roundName = (count) => count === 2 ? 'Grand Final' : count === 4 ? 'Semi-Finals' : count === 8 ? 'Quarter-Finals' : count > 8 ? `Round of ${count}` : 'Final';
+        while (currentTeams.length >= 2) {
+          const round = [];
+          for (let index = 0; index < currentTeams.length; index += 2) {
+            round.push({
+              id: `R${roundNumber}-M${index / 2 + 1}`,
+              team1: currentTeams[index],
+              team2: currentTeams[index + 1],
+              score1: '-',
+              score2: '-',
+              winner: null
+            });
+          }
+          bracketRounds.push({ name: roundName(currentTeams.length), matches: round });
+          currentTeams = Array.from({ length: round.length }, (_, index) => `Winner of ${round[index].id}`);
+          roundNumber++;
+        }
         const tournament = {
           id: 'TOUR-' + Date.now(),
           name,
@@ -1308,6 +1359,8 @@
           startDate,
           teamCount,
           status: 'Planned',
+          teams: selectedTeams,
+          bracketRounds,
           createdAt: new Date().toISOString()
         };
         state.tournaments.unshift(tournament);
