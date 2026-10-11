@@ -452,6 +452,10 @@
       });
     });
 
+    document.querySelectorAll('.team-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => openModal('EDIT_TEAM', btn.dataset.id));
+    });
+
     document.querySelectorAll('.team-delete-btn').forEach(btn => {
       btn.addEventListener('click', () => deleteTeam(btn.dataset.id));
     });
@@ -1015,6 +1019,70 @@
         }
 
         state.teams.push(newTeam);
+        closeModal();
+        renderAllViews();
+      };
+    } else if (type === 'EDIT_TEAM') {
+      const team = state.teams.find(t => String(t.id) === String(targetId));
+      if (!team) {
+        closeModal();
+        alert('Team not found.');
+        return;
+      }
+      title.textContent = 'Edit Team Details';
+      body.innerHTML = `
+        <form id="modal-form">
+          <div class="form-group">
+            <label for="f-team-name">Team Name</label>
+            <input type="text" class="form-control" id="f-team-name" required maxlength="100" value="${escapeHtml(team.name)}">
+          </div>
+          <div class="form-group">
+            <label for="f-team-coach">Head Coach</label>
+            <input type="text" class="form-control" id="f-team-coach" required maxlength="100" value="${escapeHtml(team.coach || '')}">
+          </div>
+          <div class="form-group">
+            <label for="f-team-city">City / Region</label>
+            <input type="text" class="form-control" id="f-team-city" maxlength="100" value="${escapeHtml(team.city || '')}">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block mt-3"><i class="fa-solid fa-floppy-disk"></i> Save Changes</button>
+        </form>
+      `;
+      document.getElementById('modal-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('f-team-name').value.trim();
+        const coach = document.getElementById('f-team-coach').value.trim();
+        const city = document.getElementById('f-team-city').value.trim() || 'City';
+        if (!name || !coach) {
+          alert('Team name and coach are required.');
+          return;
+        }
+        if (state.teams.some(t => String(t.id) !== String(team.id) && t.name.toLowerCase() === name.toLowerCase())) {
+          alert('A team with that name already exists.');
+          return;
+        }
+        if (isBackendConnected) {
+          try {
+            const res = await fetch(`${API_BASE}/teams/${encodeURIComponent(team.id)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, coach, city })
+            });
+            if (!res.ok) throw new Error('The server could not update this team.');
+          } catch (err) {
+            alert(err.message || 'Could not update team on the server. Please try again.');
+            return;
+          }
+        }
+        team.name = name;
+        team.coach = coach;
+        team.city = city;
+        state.players.forEach(p => {
+          if (String(p.teamId) === String(team.id)) p.teamName = name;
+        });
+        state.matches.forEach(m => {
+          if (String(m.homeTeamId) === String(team.id)) m.homeTeamName = name;
+          if (String(m.awayTeamId) === String(team.id)) m.awayTeamName = name;
+        });
         closeModal();
         renderAllViews();
       };
