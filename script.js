@@ -23,6 +23,7 @@
     venues: [...initialVenues],
     referees: [...initialReferees],
     bracket: JSON.parse(JSON.stringify(initialBracketData)),
+    tournaments: (() => { try { return JSON.parse(localStorage.getItem('apexLeagueTournaments') || '[]'); } catch (_) { return []; } })(),
     playersFilter: { team: 'ALL', position: 'ALL', query: '' },
     matchFilter: 'ALL'
   };
@@ -103,10 +104,11 @@
     // Global Search Input
     document.getElementById('global-search-input')?.addEventListener('input', (e) => {
       const q = e.target.value.toLowerCase().trim();
-      if (q) {
-        state.playersFilter.query = q;
-        switchSubView('players');
-      }
+      state.playersFilter.query = q;
+      const localSearch = document.getElementById('players-search-input');
+      if (localSearch) localSearch.value = e.target.value;
+      switchSubView('players');
+      renderPlayers();
     });
 
     // Players Filters
@@ -261,7 +263,7 @@
     
     document.getElementById('kpi-upcoming-matches').textContent = upcoming;
     document.getElementById('kpi-completed-matches').textContent = completed;
-    document.getElementById('kpi-active-tournaments').textContent = 3;
+    document.getElementById('kpi-active-tournaments').textContent = 3 + (state.tournaments || []).length;
     document.getElementById('kpi-total-coaches').textContent = state.coaches.length;
     document.getElementById('kpi-total-referees').textContent = state.referees.length;
   }
@@ -607,7 +609,58 @@
   // ------------------------------------------
   // 6. TOURNAMENTS SUB-VIEW
   // ------------------------------------------
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[char]);
+  }
+
   function renderTournaments() {
+    const tournamentSection = document.getElementById('view-tournaments');
+    if (tournamentSection) {
+      let createdList = document.getElementById('created-tournaments-list');
+      if (!createdList) {
+        createdList = document.createElement('div');
+        createdList.id = 'created-tournaments-list';
+        createdList.className = 'card mt-4';
+        const heading = document.createElement('h3');
+        heading.className = 'card-title';
+        heading.textContent = 'Created Tournaments';
+        createdList.appendChild(heading);
+        const pageTitle = tournamentSection.querySelector('.page-title-row');
+        if (pageTitle) pageTitle.insertAdjacentElement('afterend', createdList);
+        else tournamentSection.prepend(createdList);
+      }
+      const query = (document.getElementById('global-search-input')?.value || '').trim().toLowerCase();
+      const tournaments = state.tournaments.filter(t => !query || t.name.toLowerCase().includes(query) || t.format.toLowerCase().includes(query));
+      createdList.innerHTML = '<h3 class="card-title">Created Tournaments</h3>' + (
+        tournaments.length
+          ? '<div class="grid-2-col mt-3">' + tournaments.map(t => `
+              <article class="card">
+                <div class="card-header">
+                  <div>
+                    <h4 class="card-title">${escapeHtml(t.name)}</h4>
+                    <p class="card-subtitle">${escapeHtml(t.format)} • ${t.teamCount} teams</p>
+                  </div>
+                  <span class="badge badge-cyan">${escapeHtml(t.status)}</span>
+                </div>
+                <p class="card-subtitle">Starts: ${escapeHtml(t.startDate)}</p>
+                <button type="button" class="btn btn-sm btn-outline tournament-delete-btn" data-id="${t.id}"><i class="fa-solid fa-trash"></i> Delete</button>
+              </article>
+            `).join('') + '</div>'
+          : '<p class="card-subtitle mt-3">' + (query ? 'No created tournaments match your search.' : 'No tournaments created yet. Use “Create Tournament” to add one.') + '</p>'
+      );
+      createdList.querySelectorAll('.tournament-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (!confirm('Delete this tournament?')) return;
+          state.tournaments = state.tournaments.filter(t => t.id !== btn.dataset.id);
+          try { localStorage.setItem('apexLeagueTournaments', JSON.stringify(state.tournaments)); } catch (_) {}
+          renderTournaments();
+          renderDashboardKPIs();
+        });
+      });
+    }
+
     // Render Knockout Bracket
     const bracketContainer = document.getElementById('knockout-bracket-container');
     if (bracketContainer) {
@@ -1002,7 +1055,24 @@
         const position = document.getElementById('f-player-pos').value;
         const teamId = document.getElementById('f-player-team').value;
         const team = state.teams.find(t => t.id === teamId);
-        const jerseyNumber = parseInt(document.getElementById('f-player-jersey').value);
+        const jerseyNumber = parseInt(document.getElementById('f-player-jersey').value, 10);
+
+        if (!name.trim()) {
+          alert('Please enter the player name.');
+          return;
+        }
+        if (!team) {
+          alert('Please create a team before registering a player.');
+          return;
+        }
+        if (!Number.isInteger(jerseyNumber) || jerseyNumber < 0 || jerseyNumber > 99) {
+          alert('Jersey number must be a whole number between 0 and 99.');
+          return;
+        }
+        if (state.players.some(p => String(p.teamId) === String(teamId) && Number(p.jerseyNumber) === jerseyNumber)) {
+          alert('That jersey number is already assigned to a player in this team.');
+          return;
+        }
 
         const newPlayer = {
           id: `P${state.players.length + 101}`,
@@ -1043,6 +1113,61 @@
         state.players.push(newPlayer);
         closeModal();
         renderAllViews();
+      };
+    } else if (type === 'CREATE_TOURNAMENT') {
+      title.textContent = 'Create Tournament';
+      body.innerHTML = `
+        <form id="modal-form">
+          <div class="form-group">
+            <label for="f-tournament-name">Tournament Name</label>
+            <input type="text" class="form-control" id="f-tournament-name" required maxlength="100" placeholder="e.g. Apex Champions Cup">
+          </div>
+          <div class="form-group">
+            <label for="f-tournament-format">Format</label>
+            <select class="form-control" id="f-tournament-format" required>
+              <option value="Knockout">Knockout</option>
+              <option value="League">League</option>
+              <option value="Group Stage + Knockout">Group Stage + Knockout</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="f-tournament-start">Start Date</label>
+            <input type="date" class="form-control" id="f-tournament-start" required>
+          </div>
+          <div class="form-group">
+            <label for="f-tournament-teams">Number of Teams</label>
+            <input type="number" class="form-control" id="f-tournament-teams" min="2" max="64" value="8" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block mt-3"><i class="fa-solid fa-trophy"></i> Create Tournament</button>
+        </form>
+      `;
+
+      document.getElementById('modal-form').onsubmit = (e) => {
+        e.preventDefault();
+        const name = document.getElementById('f-tournament-name').value.trim();
+        const format = document.getElementById('f-tournament-format').value;
+        const startDate = document.getElementById('f-tournament-start').value;
+        const teamCount = Number(document.getElementById('f-tournament-teams').value);
+        if (!name || !startDate || !Number.isInteger(teamCount) || teamCount < 2 || teamCount > 64) {
+          alert('Please enter a tournament name, start date, and a team count between 2 and 64.');
+          return;
+        }
+        const tournament = {
+          id: 'TOUR-' + Date.now(),
+          name,
+          format,
+          startDate,
+          teamCount,
+          status: 'Planned',
+          createdAt: new Date().toISOString()
+        };
+        state.tournaments.unshift(tournament);
+        try { localStorage.setItem('apexLeagueTournaments', JSON.stringify(state.tournaments)); } catch (err) {
+          console.warn('Could not save tournaments in this browser:', err);
+        }
+        closeModal();
+        renderTournaments();
+        renderDashboardKPIs();
       };
     } else if (type === 'SCHEDULE_MATCH') {
       title.textContent = 'Schedule League Match';
