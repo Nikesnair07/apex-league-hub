@@ -102,14 +102,20 @@
     });
 
     // Global Search Input
-    document.getElementById('global-search-input')?.addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase().trim();
-      state.playersFilter.query = q;
-      const localSearch = document.getElementById('players-search-input');
-      if (localSearch) localSearch.value = e.target.value;
-      switchSubView('players');
-      renderPlayers();
-    });
+    const globalSearch = document.getElementById('global-search-input');
+    if (globalSearch) {
+      globalSearch.addEventListener('input', () => renderGlobalSearchResults(globalSearch.value));
+      globalSearch.addEventListener('focus', () => {
+        if (globalSearch.value.trim()) renderGlobalSearchResults(globalSearch.value);
+      });
+      document.addEventListener('click', (event) => {
+        const box = globalSearch.closest('.search-box');
+        if (box && !box.contains(event.target)) {
+          const results = document.getElementById('global-search-results');
+          if (results) results.hidden = true;
+        }
+      });
+    }
 
     // Players Filters
     document.getElementById('players-search-input')?.addEventListener('input', (e) => {
@@ -170,6 +176,81 @@
 
     // Reports Print
     document.getElementById('reports-print-btn')?.addEventListener('click', () => window.print());
+  }
+
+  function renderGlobalSearchResults(rawQuery) {
+    const input = document.getElementById('global-search-input');
+    if (!input) return;
+    const box = input.closest('.search-box');
+    if (!box) return;
+    let panel = document.getElementById('global-search-results');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'global-search-results';
+      panel.className = 'global-search-results';
+      panel.style.cssText = 'position:absolute;top:calc(100% + 8px);left:0;right:0;z-index:1200;max-height:340px;overflow:auto;background:var(--surface-card, #111827);border:1px solid var(--border-color, #374151);border-radius:10px;box-shadow:0 12px 28px rgba(0,0,0,.25);padding:6px;';
+      box.style.position = 'relative';
+      box.appendChild(panel);
+    }
+    const q = String(rawQuery || '').trim().toLowerCase();
+    if (!q) {
+      panel.hidden = true;
+      return;
+    }
+    const items = [];
+    state.teams.forEach(t => {
+      if ([t.name, t.coach, t.city].some(v => String(v || '').toLowerCase().includes(q))) {
+        items.push({type:'Team',label:t.name,detail:'Team / Franchise',view:'teams',id:t.id});
+      }
+    });
+    state.players.forEach(p => {
+      if ([p.name, p.position, p.teamName, p.jerseyNumber].some(v => String(v ?? '').toLowerCase().includes(q))) {
+        items.push({type:'Player',label:p.name,detail:`${p.position} • ${p.teamName} • #${p.jerseyNumber}`,view:'players',id:p.id});
+      }
+    });
+    state.matches.forEach(m => {
+      if ([m.homeTeamName, m.awayTeamName, m.venue, m.date, m.status].some(v => String(v || '').toLowerCase().includes(q))) {
+        items.push({type:'Match',label:`${m.homeTeamName} vs ${m.awayTeamName}`,detail:`${m.date} • ${m.status} • ${m.venue}`,view:'matches',id:m.id});
+      }
+    });
+    state.venues.forEach(v => {
+      if ([v.name, v.address].some(value => String(value || '').toLowerCase().includes(q))) {
+        items.push({type:'Venue',label:v.name,detail:v.address || 'Venue / Stadium',view:'venues',id:v.id});
+      }
+    });
+    (state.tournaments || []).forEach(t => {
+      if ([t.name, t.format, t.status].some(value => String(value || '').toLowerCase().includes(q))) {
+        items.push({type:'Tournament',label:t.name,detail:`${t.format} • ${t.status}`,view:'tournaments',id:t.id});
+      }
+    });
+    panel.innerHTML = items.length ? items.slice(0, 12).map(item => `
+      <button type="button" class="global-search-result" data-view="${item.view}" data-type="${item.type}" data-id="${escapeHtml(item.id)}" style="display:block;width:100%;text-align:left;border:0;border-radius:7px;padding:9px 10px;background:transparent;color:inherit;cursor:pointer;">
+        <span style="display:block;font-weight:700;">${escapeHtml(item.label)}</span>
+        <span style="display:block;font-size:.78rem;opacity:.72;">${escapeHtml(item.type)} · ${escapeHtml(item.detail)}</span>
+      </button>
+    `).join('') : '<div style="padding:12px;font-size:.9rem;opacity:.75;">No teams, players, matches, venues, or tournaments found.</div>';
+    panel.hidden = false;
+    panel.querySelectorAll('.global-search-result').forEach(button => {
+      button.addEventListener('mouseenter', () => { button.style.background = 'rgba(148,163,184,.14)'; });
+      button.addEventListener('mouseleave', () => { button.style.background = 'transparent'; });
+      button.addEventListener('click', () => {
+        const view = button.dataset.view;
+        if (view === 'players') {
+          state.playersFilter.query = q;
+          const localSearch = document.getElementById('players-search-input');
+          if (localSearch) localSearch.value = q;
+        } else if (view === 'teams') {
+          state.teamSearchQuery = q;
+        } else if (view === 'matches') {
+          state.matchSearchQuery = q;
+        } else if (view === 'venues') {
+          state.venueSearchQuery = q;
+        }
+        switchSubView(view);
+        renderAllViews();
+        panel.hidden = true;
+      });
+    });
   }
 
   function switchScreen(screenName) {
